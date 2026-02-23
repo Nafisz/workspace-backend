@@ -28,7 +28,10 @@ export default fp(async function integrationsRoutes(app: FastifyInstance) {
     const body = req.body as { token?: string; defaultChannel?: string; enabled?: boolean };
     const payload = { token: body.token, defaultChannel: body.defaultChannel, enabled: body.enabled ?? true };
     db.prepare('UPDATE integration_configs SET slack = ? WHERE id = ?').run(JSON.stringify(payload), 'singleton');
-    if (body.token) process.env.SLACK_TOKEN = body.token;
+    if (body.token) {
+      process.env.SLACK_TOKEN = body.token;
+      mcpManager.disconnect('slack'); // Force reconnect with new token
+    }
     return reply.send({ ok: true });
   });
 
@@ -36,7 +39,10 @@ export default fp(async function integrationsRoutes(app: FastifyInstance) {
     const body = req.body as { baseUrl?: string; token?: string; email?: string; enabled?: boolean };
     const payload = { baseUrl: body.baseUrl, token: body.token, email: body.email, enabled: body.enabled ?? true };
     db.prepare('UPDATE integration_configs SET jira = ? WHERE id = ?').run(JSON.stringify(payload), 'singleton');
-    if (body.token) process.env.ATLASSIAN_TOKEN = body.token;
+    if (body.token) {
+      process.env.ATLASSIAN_TOKEN = body.token;
+      mcpManager.disconnect('atlassian'); // Force reconnect with new token
+    }
     if (body.email) process.env.ATLASSIAN_EMAIL = body.email;
     return reply.send({ ok: true });
   });
@@ -45,7 +51,10 @@ export default fp(async function integrationsRoutes(app: FastifyInstance) {
     const body = req.body as { baseUrl?: string; token?: string; email?: string; enabled?: boolean };
     const payload = { baseUrl: body.baseUrl, token: body.token, email: body.email, enabled: body.enabled ?? true };
     db.prepare('UPDATE integration_configs SET confluence = ? WHERE id = ?').run(JSON.stringify(payload), 'singleton');
-    if (body.token) process.env.ATLASSIAN_TOKEN = body.token;
+    if (body.token) {
+      process.env.ATLASSIAN_TOKEN = body.token;
+      mcpManager.disconnect('atlassian'); // Force reconnect with new token
+    }
     if (body.email) process.env.ATLASSIAN_EMAIL = body.email;
     return reply.send({ ok: true });
   });
