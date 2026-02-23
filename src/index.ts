@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
@@ -76,6 +77,11 @@ server.setNotFoundHandler((req, reply) => {
 });
 
 await server.register(async (app) => {
+  app.get('/', async () => ({
+    name: 'novax-backend',
+    status: 'ok',
+    routes: ['/api/projects', '/api/projects/:id', '/api/cowork/tasks', '/api/integrations']
+  }));
   app.addHook('preHandler', authMiddleware);
   await app.register(projectsRoutes, { prefix: '/projects' });
   await app.register(documentsRoutes, { prefix: '/projects' });
