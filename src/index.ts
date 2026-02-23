@@ -14,7 +14,7 @@ import integrationsRoutes from './routes/integrations.js';
 import coworkRoutes from './routes/cowork.js';
 import registerWs from './ws/handler.js';
 
-const server = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
+const server = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, ignoreTrailingSlash: true });
 
 const uploadDir = process.env.UPLOAD_DIR ?? './data/uploads';
 const resolvedUploadDir = path.resolve(process.cwd(), uploadDir);
@@ -75,6 +75,12 @@ server.setErrorHandler((error, req, reply) => {
 server.setNotFoundHandler((req, reply) => {
   reply.status(404).send({ error: 'Not Found' });
 });
+
+server.get('/api', async () => ({
+  name: 'novax-backend',
+  status: 'ok',
+  routes: ['/api/projects', '/api/projects/:id', '/api/cowork/tasks', '/api/integrations', '/api/_meta']
+}));
 
 await server.register(async (app) => {
   app.get('/_meta', async () => ({
