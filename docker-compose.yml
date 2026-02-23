@@ -10,5 +10,5 @@ services:
       - PORT=8080
       - HOST=0.0.0.0
       - NODE_ENV=production
-      # Add other env vars here, e.g. ANTHROPIC_API_KEY
+      # Add other env vars here, e.g. FIREWORKS_API_KEY
     restart: unless-stopped

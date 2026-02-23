@@ -11,7 +11,7 @@ To run the backend using Docker, ensure you have Docker and Docker Compose insta
     ```bash
     cp .env.example .env
     ```
-    Edit `.env` and set your `ANTHROPIC_API_KEY` and `API_KEY`.
+    Edit `.env` and set your `FIREWORKS_API_KEY` and `API_KEY`.
 
 2.  **Start the Service:**
     ```bash

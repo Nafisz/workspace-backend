@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { getDb } from '../db/client.js';
+import { buildSystemPrompt, streamMessageWithTools } from '../services/ai.js';
 
 export const taskEvents = new EventEmitter();
 

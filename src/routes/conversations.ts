@@ -2,7 +2,7 @@ import fp from 'fastify-plugin';
 import { FastifyInstance } from 'fastify';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/client.js';
-import { buildSystemPrompt, streamMessageWithTools } from '../services/claude.js';
+import { buildSystemPrompt, streamMessageWithTools } from '../services/ai.js';
 import { mcpManager } from '../services/mcp.js';
 
 export default fp(async function conversationsRoutes(app: FastifyInstance) {

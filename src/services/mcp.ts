@@ -1,13 +1,16 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 
-function convertMCPToolToAnthropic(tool: any): Anthropic.Tool {
+function convertMCPToolToOpenAI(tool: any): OpenAI.Chat.Completions.ChatCompletionTool {
   return {
-    name: tool.name,
-    description: tool.description ?? '',
-    input_schema: tool.inputSchema ?? tool.input_schema ?? { type: 'object', properties: {} }
-  } as Anthropic.Tool;
+    type: 'function',
+    function: {
+        name: tool.name,
+        description: tool.description ?? '',
+        parameters: tool.inputSchema ?? tool.input_schema ?? { type: 'object', properties: {} }
+    }
+  };
 }
 
 class MCPManager {
@@ -31,12 +34,12 @@ class MCPManager {
     return client;
   }
 
-  async getTools(services: Array<'slack' | 'atlassian'>): Promise<Anthropic.Tool[]> {
-    const tools: Anthropic.Tool[] = [];
+  async getTools(services: Array<'slack' | 'atlassian'>): Promise<OpenAI.Chat.Completions.ChatCompletionTool[]> {
+    const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
     for (const service of services) {
       const client = this.clients.get(service) ?? (await this.connect(service));
       const { tools: mcpTools } = await client.listTools();
-      tools.push(...mcpTools.map(convertMCPToolToAnthropic));
+      tools.push(...mcpTools.map(convertMCPToolToOpenAI));
     }
     return tools;
   }
