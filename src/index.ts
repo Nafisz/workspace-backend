@@ -26,18 +26,31 @@ try {
   await mkdir(resolvedUploadDir, { recursive: true });
 }
 
-const allowedOrigins = [
+const allowedOrigins: (string | RegExp)[] = [
   /^tauri:\/\/localhost$/,
   /^http:\/\/localhost:\d+$/,
   /^https:\/\/localhost:\d+$/
 ];
+
+if (process.env.CORS_ALLOW_ORIGIN) {
+  allowedOrigins.push(process.env.CORS_ALLOW_ORIGIN);
+}
+
 await server.register(cors, {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
-    const ok = allowedOrigins.some((rule) =>
-      typeof rule === 'string' ? rule === origin : rule.test(origin)
-    );
-    cb(null, ok);
+    
+    // Check if origin matches any rule
+    const isAllowed = allowedOrigins.some((rule) => {
+      if (typeof rule === 'string') {
+        return rule === origin || rule === '*';
+      }
+      return rule.test(origin);
+    });
+
+    if (isAllowed) return cb(null, true);
+    
+    cb(null, false);
   }
 });
 await server.register(multipart, {
