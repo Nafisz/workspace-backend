@@ -1,0 +1,14 @@
+services:
+  backend:
+    build: .
+    container_name: novax-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PORT=8080
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      # Add other env vars here, e.g. ANTHROPIC_API_KEY
+    restart: unless-stopped
