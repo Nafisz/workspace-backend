@@ -62,7 +62,7 @@ export async function* streamMessageWithTools(params: {
     let assistantText = '';
     
     const stream = await client.chat.completions.create({
-      model: params.model ?? 'accounts/fireworks/models/minimax-v2.5', // Using Minimax model as requested
+      model: params.model ?? 'accounts/fireworks/models/minimax-m.25', // Using Minimax model as requested
       messages: currentMessages,
       tools: params.tools,
       stream: true,
