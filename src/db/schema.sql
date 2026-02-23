@@ -65,3 +65,22 @@ CREATE TABLE IF NOT EXISTS integration_configs (
 );
 
 INSERT OR IGNORE INTO integration_configs (id) VALUES ('singleton');
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT,
+  password_hash TEXT NOT NULL,
+  role TEXT DEFAULT 'member',
+  created_at INTEGER NOT NULL,
+  last_login_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER,
+  expires_at INTEGER
+);

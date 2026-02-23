@@ -12,9 +12,13 @@ import documentsRoutes from './routes/documents.js';
 import conversationsRoutes from './routes/conversations.js';
 import integrationsRoutes from './routes/integrations.js';
 import coworkRoutes from './routes/cowork.js';
+import authRoutes from './routes/auth.js';
 import registerWs from './ws/handler.js';
 
-const server = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, ignoreTrailingSlash: true });
+const server = Fastify({
+  logger: { level: process.env.LOG_LEVEL ?? 'info' },
+  routerOptions: { ignoreTrailingSlash: true }
+});
 
 const uploadDir = process.env.UPLOAD_DIR ?? './data/uploads';
 const resolvedUploadDir = path.resolve(process.cwd(), uploadDir);
@@ -76,19 +80,19 @@ server.setNotFoundHandler((req, reply) => {
   reply.status(404).send({ error: 'Not Found' });
 });
 
-server.get('/api', async () => ({
-  name: 'novax-backend',
-  status: 'ok',
-  routes: ['/api/projects', '/api/projects/:id', '/api/cowork/tasks', '/api/integrations', '/api/_meta']
-}));
-
 await server.register(async (app) => {
+  app.get('/', async () => ({
+    name: 'novax-backend',
+    status: 'ok',
+    routes: ['/api/projects', '/api/projects/:id', '/api/cowork/tasks', '/api/integrations', '/api/_meta']
+  }));
   app.get('/_meta', async () => ({
     name: 'novax-backend',
     status: 'ok',
     routes: ['/api/projects', '/api/projects/:id', '/api/cowork/tasks', '/api/integrations']
   }));
   app.addHook('preHandler', authMiddleware);
+  await app.register(authRoutes, { prefix: '/' });
   await app.register(projectsRoutes, { prefix: '/projects' });
   await app.register(documentsRoutes, { prefix: '/projects' });
   await app.register(conversationsRoutes, { prefix: '/' });
