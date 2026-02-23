@@ -77,7 +77,7 @@ server.setNotFoundHandler((req, reply) => {
 });
 
 await server.register(async (app) => {
-  app.get('/', async () => ({
+  app.get('/_meta', async () => ({
     name: 'novax-backend',
     status: 'ok',
     routes: ['/api/projects', '/api/projects/:id', '/api/cowork/tasks', '/api/integrations']
