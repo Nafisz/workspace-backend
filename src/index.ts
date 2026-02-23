@@ -29,7 +29,8 @@ try {
 const allowedOrigins: (string | RegExp)[] = [
   /^tauri:\/\/localhost$/,
   /^http:\/\/localhost:\d+$/,
-  /^https:\/\/localhost:\d+$/
+  /^https:\/\/localhost:\d+$/,
+  'file://'
 ];
 
 if (process.env.CORS_ALLOW_ORIGIN) {
