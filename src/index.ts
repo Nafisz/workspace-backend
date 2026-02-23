@@ -1,0 +1,78 @@
+import Fastify from 'fastify';
+import multipart from '@fastify/multipart';
+import websocket from '@fastify/websocket';
+import cors from '@fastify/cors';
+import { mkdir, access } from 'fs/promises';
+import path from 'path';
+import { authMiddleware } from './lib/auth.js';
+import { initDb } from './db/client.js';
+import projectsRoutes from './routes/projects.js';
+import documentsRoutes from './routes/documents.js';
+import conversationsRoutes from './routes/conversations.js';
+import integrationsRoutes from './routes/integrations.js';
+import coworkRoutes from './routes/cowork.js';
+import registerWs from './ws/handler.js';
+
+const server = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
+
+const uploadDir = process.env.UPLOAD_DIR ?? './data/uploads';
+const resolvedUploadDir = path.resolve(process.cwd(), uploadDir);
+
+await initDb();
+
+try {
+  await access(resolvedUploadDir);
+} catch {
+  await mkdir(resolvedUploadDir, { recursive: true });
+}
+
+const allowedOrigins = [
+  /^tauri:\/\/localhost$/,
+  /^http:\/\/localhost:\d+$/,
+  /^https:\/\/localhost:\d+$/
+];
+await server.register(cors, {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    const ok = allowedOrigins.some((rule) =>
+      typeof rule === 'string' ? rule === origin : rule.test(origin)
+    );
+    cb(null, ok);
+  }
+});
+await server.register(multipart, {
+  limits: {
+    fileSize: (Number(process.env.MAX_FILE_SIZE_MB) || 10) * 1024 * 1024
+  }
+});
+await server.register(websocket);
+
+await registerWs(server);
+
+server.setErrorHandler((error, req, reply) => {
+  req.log.error(error);
+  const err = error as any;
+  const status = err?.statusCode ?? 500;
+  const message = status >= 500 ? 'Internal Server Error' : err?.message ?? 'Error';
+  reply.status(status).send({ error: message });
+});
+
+server.setNotFoundHandler((req, reply) => {
+  reply.status(404).send({ error: 'Not Found' });
+});
+
+await server.register(async (app) => {
+  app.addHook('preHandler', authMiddleware);
+  await app.register(projectsRoutes, { prefix: '/projects' });
+  await app.register(documentsRoutes, { prefix: '/projects' });
+  await app.register(conversationsRoutes, { prefix: '/' });
+  await app.register(integrationsRoutes, { prefix: '/' });
+  await app.register(coworkRoutes, { prefix: '/' });
+}, { prefix: '/api' });
+
+server.get('/health', async () => ({ status: 'ok' }));
+
+const port = Number(process.env.PORT) || 8080;
+const host = process.env.HOST || '0.0.0.0';
+
+await server.listen({ port, host });
