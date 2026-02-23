@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 
 const client = new OpenAI({
-  apiKey: process.env.FIREWORKS_API_KEY,
+  apiKey: process.env.FIREWORKS_API_KEY || process.env.OPENAI_API_KEY || 'dummy',
   baseURL: 'https://api.fireworks.ai/inference/v1'
 });
 
