@@ -3,8 +3,9 @@ import { taskEvents } from '../services/cowork-runner.js';
 
 export default async function registerWs(app: FastifyInstance) {
   app.get('/ws', { websocket: true }, (connection, req) => {
+    const expectedKey = process.env.API_KEY;
     const key = req.headers['x-api-key'] || (req.query as any).token;
-    if (key !== process.env.API_KEY) {
+    if (expectedKey && key !== expectedKey) {
       connection.socket.close();
       return;
     }

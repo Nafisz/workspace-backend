@@ -1,6 +1,9 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 
 export async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
+  if (!process.env.API_KEY) {
+    return;
+  }
   const headerKey = req.headers['x-api-key'];
   const authHeader = req.headers.authorization;
   const bearer = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
