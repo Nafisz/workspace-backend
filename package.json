@@ -15,6 +15,7 @@
     "@fastify/websocket": "^11.0.0",
     "@modelcontextprotocol/sdk": "^1.7.1",
     "better-sqlite3": "^11.6.0",
+    "dotenv": "^16.6.1",
     "fastify": "^5.7.4",
     "fastify-plugin": "^4.5.1",
     "mammoth": "^1.8.0",
