@@ -6,9 +6,17 @@ services:
       - "8080:8080"
     volumes:
       - ./data:/app/data
+    env_file:
+      - .env
     environment:
       - PORT=8080
       - HOST=0.0.0.0
       - NODE_ENV=production
-      # Add other env vars here, e.g. FIREWORKS_API_KEY
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - FIREWORKS_MODEL=${FIREWORKS_MODEL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL}
+      - API_KEY=${API_KEY}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
     restart: unless-stopped
