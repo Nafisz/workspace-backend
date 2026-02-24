@@ -14,12 +14,12 @@ function parseProject(row: any) {
 export default fp(async function projectsRoutes(app: FastifyInstance) {
   const db = getDb();
 
-  app.get('/', async () => {
+  app.get('/projects', async () => {
     const rows = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
     return rows.map(parseProject);
   });
 
-  app.post('/', async (req, reply) => {
+  app.post('/projects', async (req, reply) => {
     const body = req.body as {
       name: string;
       description?: string;
@@ -55,7 +55,7 @@ export default fp(async function projectsRoutes(app: FastifyInstance) {
     return parseProject(row);
   });
 
-  app.get('/:id', async (req, reply) => {
+  app.get('/projects/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
     if (!project) return reply.status(404).send({ error: 'not found' });
@@ -68,7 +68,7 @@ export default fp(async function projectsRoutes(app: FastifyInstance) {
     };
   });
 
-  app.put('/:id', async (req, reply) => {
+  app.put('/projects/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as {
       name?: string;
@@ -103,7 +103,7 @@ export default fp(async function projectsRoutes(app: FastifyInstance) {
     return parseProject(row);
   });
 
-  app.delete('/:id', async (req, reply) => {
+  app.delete('/projects/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
     if (!existing) return reply.status(404).send({ error: 'not found' });

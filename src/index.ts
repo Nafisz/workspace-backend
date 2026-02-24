@@ -88,7 +88,7 @@ await server.register(async (app) => {
   }));
   await app.register(authRoutes, { prefix: '/' });
   app.addHook('preHandler', authMiddleware);
-  await app.register(projectsRoutes, { prefix: '/projects' });
+  await app.register(projectsRoutes, { prefix: '/' });
   await app.register(documentsRoutes, { prefix: '/projects' });
   await app.register(conversationsRoutes, { prefix: '/' });
   await app.register(integrationsRoutes, { prefix: '/' });
