@@ -58,6 +58,11 @@ await server.register(cors, {
     
     cb(null, false);
   }
+  ,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+  exposedHeaders: ['Content-Type', 'Cache-Control']
 });
 await server.register(multipart, {
   limits: {
