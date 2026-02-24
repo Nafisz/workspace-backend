@@ -8,7 +8,7 @@ const client = new OpenAI({
 const defaultModel =
   process.env.FIREWORKS_MODEL ||
   process.env.OPENAI_MODEL ||
-  'accounts/fireworks/models/llama-v3p1-70b-instruct';
+  'accounts/fireworks/models/minimax-m2p5';
 
 export function buildSystemPrompt(project: any, projectDocs: any[]) {
   const docsContext = projectDocs
@@ -75,20 +75,33 @@ export async function* streamMessageWithTools(params: {
         max_tokens: 4096
       });
 
-    const desiredModel = params.model ?? defaultModel;
-    let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
-    try {
-      stream = await createStream(desiredModel);
-    } catch (error: any) {
-      const status = error?.status ?? error?.response?.status;
-      const message = String(error?.message ?? '');
-      const shouldFallback =
-        desiredModel !== defaultModel &&
-        (status === 404 || message.toLowerCase().includes('model not found'));
-      if (!shouldFallback) {
-        throw error;
+    const candidateModels = [
+      params.model,
+      defaultModel,
+      'accounts/fireworks/models/minimax-m2p5',
+      'fireworks/minimax-m2p5',
+      'accounts/fireworks/models/llama-v3p1-70b-instruct'
+    ].filter((model): model is string => Boolean(model));
+
+    let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk> | null = null;
+    let lastError: any = null;
+    for (const model of candidateModels) {
+      try {
+        stream = await createStream(model);
+        lastError = null;
+        break;
+      } catch (error: any) {
+        const status = error?.status ?? error?.response?.status;
+        const message = String(error?.message ?? '');
+        const notFound = status === 404 || message.toLowerCase().includes('model not found');
+        if (!notFound) {
+          throw error;
+        }
+        lastError = error;
       }
-      stream = await createStream(defaultModel);
+    }
+    if (!stream) {
+      throw lastError ?? new Error('model not found');
     }
 
     for await (const chunk of stream) {
