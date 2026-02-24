@@ -5,6 +5,11 @@ const client = new OpenAI({
   baseURL: 'https://api.fireworks.ai/inference/v1'
 });
 
+const defaultModel =
+  process.env.FIREWORKS_MODEL ||
+  process.env.OPENAI_MODEL ||
+  'accounts/fireworks/models/llama-v3p1-70b-instruct';
+
 export function buildSystemPrompt(project: any, projectDocs: any[]) {
   const docsContext = projectDocs
     .filter((doc) => doc.content)
@@ -60,14 +65,31 @@ export async function* streamMessageWithTools(params: {
   for (let iteration = 0; iteration < 3; iteration += 1) {
     const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
     let assistantText = '';
-    
-    const stream = await client.chat.completions.create({
-      model: params.model ?? 'accounts/fireworks/models/minimax-m.25', // Using Minimax model as requested
-      messages: currentMessages,
-      tools: params.tools,
-      stream: true,
-      max_tokens: 4096
-    });
+
+    const createStream = async (model: string) =>
+      client.chat.completions.create({
+        model,
+        messages: currentMessages,
+        tools: params.tools,
+        stream: true,
+        max_tokens: 4096
+      });
+
+    const desiredModel = params.model ?? defaultModel;
+    let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+    try {
+      stream = await createStream(desiredModel);
+    } catch (error: any) {
+      const status = error?.status ?? error?.response?.status;
+      const message = String(error?.message ?? '');
+      const shouldFallback =
+        desiredModel !== defaultModel &&
+        (status === 404 || message.toLowerCase().includes('model not found'));
+      if (!shouldFallback) {
+        throw error;
+      }
+      stream = await createStream(defaultModel);
+    }
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta;
