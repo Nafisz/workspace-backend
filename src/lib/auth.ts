@@ -36,7 +36,7 @@ const getTokenFromRequest = (req: FastifyRequest) => {
     : undefined;
   const queryToken = (req.query as { token?: string; api_key?: string; apiKey?: string } | undefined) ?? {};
   const queryValue = queryToken.token || queryToken.api_key || queryToken.apiKey;
-  return headerKey || bearer || queryValue;
+  return bearer || headerKey || queryValue;
 };
 
 const getUserFromSession = (token: string) => {
