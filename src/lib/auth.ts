@@ -8,7 +8,22 @@ type AuthUser = {
   role: string;
 };
 
-const openPaths = new Set(['/api', '/api/', '/api/_meta', '/api/auth/login', '/api/auth/register', '/health']);
+const openPaths = new Set([
+  '/api',
+  '/api/',
+  '/api/_meta',
+  '/api/auth/login',
+  '/api/auth/register',
+  '/auth/login',
+  '/auth/register',
+  '/health'
+]);
+
+const isOpenPath = (path: string) => {
+  if (openPaths.has(path)) return true;
+  if (path.startsWith('/api') && openPaths.has(path.replace('/api', ''))) return true;
+  return false;
+};
 
 const normalizeToken = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
@@ -53,7 +68,7 @@ export function getAuthContext(req: FastifyRequest) {
 
 export async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
   const path = req.url.split('?')[0];
-  if (openPaths.has(path)) {
+  if (req.method === 'OPTIONS' || isOpenPath(path)) {
     return;
   }
   const auth = getAuthContext(req);
