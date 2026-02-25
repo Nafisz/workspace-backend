@@ -1,5 +1,8 @@
 import fp from 'fastify-plugin';
 import { FastifyInstance } from 'fastify';
+import fs from 'fs';
+import { unlink, writeFile } from 'fs/promises';
+import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/client.js';
 import { buildSystemPrompt, streamMessageWithTools } from '../services/ai.js';
@@ -7,6 +10,7 @@ import { mcpManager } from '../services/mcp.js';
 
 export default fp(async function conversationsRoutes(app: FastifyInstance) {
   const db = getDb();
+  const uploadDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR ?? './data/uploads');
 
   app.get('/projects/:id/conversations', async (req, reply) => {
     const { id: projectId } = req.params as { id: string };
@@ -58,7 +62,11 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
 
   app.post('/conversations/:id/messages', async (req, reply) => {
     const { id: conversationId } = req.params as { id: string };
-    const body = req.body as { content?: string; attachments?: unknown[] };
+    const body = req.body as {
+      content?: string;
+      attachments?: unknown[];
+      outputFile?: { name?: string; mimeType?: string; content?: string };
+    };
     if (!body?.content) return reply.status(400).send({ error: 'content is required' });
 
     const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversationId) as any;
@@ -135,6 +143,39 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     }
 
     const assistantMessageId = uuidv4();
+    const assistantAttachments: Array<Record<string, unknown>> = [];
+    if (body.outputFile) {
+      const fileId = uuidv4();
+      const fileName = body.outputFile.name ?? `assistant-${fileId}.txt`;
+      const filePath = path.join(uploadDir, fileId);
+      const fileContent = body.outputFile.content ?? fullResponse;
+      const mimeType = body.outputFile.mimeType ?? 'text/plain; charset=utf-8';
+      await writeFile(filePath, fileContent ?? '');
+      const size = Buffer.byteLength(fileContent ?? '', 'utf-8');
+      db.prepare(
+        `INSERT INTO chat_files (id, conversation_id, message_id, name, mime_type, size, file_path, created_at)
+         VALUES (@id, @conversation_id, @message_id, @name, @mime_type, @size, @file_path, @created_at)`
+      ).run({
+        id: fileId,
+        conversation_id: conversationId,
+        message_id: assistantMessageId,
+        name: fileName,
+        mime_type: mimeType,
+        size,
+        file_path: filePath,
+        created_at: Date.now()
+      });
+      const filePayload = {
+        type: 'file',
+        id: fileId,
+        name: fileName,
+        mimeType,
+        size,
+        url: `/api/conversations/${conversationId}/files/${fileId}`
+      };
+      assistantAttachments.push(filePayload);
+      reply.raw.write(`data: ${JSON.stringify({ type: 'file', file: filePayload })}\n\n`);
+    }
     db.prepare(
       `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, created_at)
        VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @created_at)`
@@ -143,7 +184,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       conversation_id: conversationId,
       role: 'assistant',
       content: fullResponse,
-      attachments: JSON.stringify([]),
+      attachments: JSON.stringify(assistantAttachments),
       metadata: JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
       created_at: Date.now()
     });
@@ -168,7 +209,34 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const convo = db.prepare('SELECT id FROM conversations WHERE id = ?').get(id);
     if (!convo) return reply.status(404).send({ error: 'conversation not found' });
+    const files = db.prepare('SELECT * FROM chat_files WHERE conversation_id = ?').all(id) as any[];
+    for (const file of files) {
+      if (file?.file_path) {
+        try {
+          await unlink(file.file_path);
+        } catch {}
+      }
+    }
+    db.prepare('DELETE FROM chat_files WHERE conversation_id = ?').run(id);
     db.prepare('DELETE FROM conversations WHERE id = ?').run(id);
     return { ok: true };
+  });
+
+  app.get('/conversations/:id/files/:fileId', async (req, reply) => {
+    const { id: conversationId, fileId } = req.params as { id: string; fileId: string };
+    const file = db.prepare(
+      'SELECT * FROM chat_files WHERE id = ? AND conversation_id = ?'
+    ).get(fileId, conversationId) as any;
+    if (!file) return reply.status(404).send({ error: 'file not found' });
+    if (!file.file_path) return reply.status(404).send({ error: 'file not found' });
+    try {
+      await fs.promises.access(file.file_path);
+    } catch {
+      return reply.status(404).send({ error: 'file not found' });
+    }
+    const safeName = String(file.name ?? 'download').replace(/"/g, '');
+    reply.header('Content-Type', file.mime_type ?? 'application/octet-stream');
+    reply.header('Content-Disposition', `attachment; filename="${safeName}"`);
+    return reply.send(fs.createReadStream(file.file_path));
   });
 });

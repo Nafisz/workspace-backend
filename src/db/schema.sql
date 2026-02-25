@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS chat_files (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  mime_type TEXT DEFAULT 'application/octet-stream',
+  size INTEGER DEFAULT 0,
+  file_path TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cowork_tasks (
   id TEXT PRIMARY KEY,
   project_id TEXT REFERENCES projects(id),
