@@ -152,6 +152,18 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     reply.raw.end();
   });
 
+  app.put('/conversations/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as { title?: string };
+    const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) as any;
+    if (!convo) return reply.status(404).send({ error: 'conversation not found' });
+    const now = Date.now();
+    const title = body?.title ?? convo.title;
+    db.prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?').run(title, now, id);
+    const row = db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) as any;
+    return row;
+  });
+
   app.delete('/conversations/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const convo = db.prepare('SELECT id FROM conversations WHERE id = ?').get(id);
