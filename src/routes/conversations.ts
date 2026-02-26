@@ -222,6 +222,18 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
 
       const assistantMessageId = uuidv4();
       const assistantAttachments: Array<Record<string, unknown>> = [];
+      db.prepare(
+        `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, created_at)
+         VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @created_at)`
+      ).run({
+        id: assistantMessageId,
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: responseText,
+        attachments: JSON.stringify([]),
+        metadata: JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
+        created_at: Date.now()
+      });
       if (outputFileSpec) {
         const fileId = uuidv4();
         const fileName = outputFileSpec.name ?? `assistant-${fileId}.txt`;
@@ -252,20 +264,12 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
           url: `/api/conversations/${conversationId}/files/${fileId}`
         };
         assistantAttachments.push(filePayload);
+        db.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(
+          JSON.stringify(assistantAttachments),
+          assistantMessageId
+        );
         reply.raw.write(`data: ${JSON.stringify({ type: 'file', file: filePayload })}\n\n`);
       }
-      db.prepare(
-        `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, created_at)
-         VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @created_at)`
-      ).run({
-        id: assistantMessageId,
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: responseText,
-        attachments: JSON.stringify(assistantAttachments),
-        metadata: JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
-        created_at: Date.now()
-      });
     } catch (error: any) {
       reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: error?.message ?? 'file generation error' })}\n\n`);
     }
