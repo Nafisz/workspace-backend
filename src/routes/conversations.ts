@@ -75,7 +75,10 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     if (!project) return reply.status(404).send({ error: 'project not found' });
 
     const docs = db.prepare('SELECT * FROM documents WHERE project_id = ?').all(project.id) as any[];
-    const systemPrompt = buildSystemPrompt(project, docs);
+    const fileInstruction = body.outputFile
+      ? '\n\nJika perlu membuat file, gunakan format:\nRESPONSE:\n<tulisan jawaban singkat>\n\nFILE:\n<isi file lengkap>\n\nJangan menaruh isi file di bagian RESPONSE.'
+      : '';
+    const systemPrompt = buildSystemPrompt(project, docs) + fileInstruction;
 
     const historyRows = db.prepare(
       `SELECT * FROM messages WHERE conversation_id = ?
@@ -131,7 +134,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       })) {
         if (event.type === 'text') {
           fullResponse += event.text;
-          reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: event.text })}\n\n`);
+          if (!body.outputFile) {
+            reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: event.text })}\n\n`);
+          }
         } else if (event.type === 'tool_use') {
           reply.raw.write(`data: ${JSON.stringify({ type: 'tool_use', name: event.name })}\n\n`);
         }
@@ -142,16 +147,40 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       return;
     }
 
+    const extractFileSections = (text: string) => {
+      const fileMarker = /(^|\n)FILE:\s*/i;
+      const responseMarker = /(^|\n)RESPONSE:\s*/i;
+      const fileIndex = text.search(fileMarker);
+      if (fileIndex === -1) {
+        return { responseText: text.replace(responseMarker, '').trim(), fileContent: '' };
+      }
+      const responseText = text
+        .slice(0, fileIndex)
+        .replace(responseMarker, '')
+        .trim();
+      const filePart = text.slice(fileIndex).replace(fileMarker, '').trim();
+      const fenceMatch = filePart.match(/```(?:[^\n]*)\n([\s\S]*?)```/);
+      const fileContent = fenceMatch ? fenceMatch[1].trim() : filePart;
+      return { responseText, fileContent };
+    };
+
+    const { responseText, fileContent } = body.outputFile
+      ? extractFileSections(fullResponse)
+      : { responseText: fullResponse, fileContent: '' };
+    if (body.outputFile && responseText) {
+      reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: responseText })}\n\n`);
+    }
+
     const assistantMessageId = uuidv4();
     const assistantAttachments: Array<Record<string, unknown>> = [];
     if (body.outputFile) {
       const fileId = uuidv4();
       const fileName = body.outputFile.name ?? `assistant-${fileId}.txt`;
       const filePath = path.join(uploadDir, fileId);
-      const fileContent = body.outputFile.content ?? fullResponse;
+      const resolvedContent = body.outputFile.content ?? fileContent ?? fullResponse;
       const mimeType = body.outputFile.mimeType ?? 'text/plain; charset=utf-8';
-      await writeFile(filePath, fileContent ?? '');
-      const size = Buffer.byteLength(fileContent ?? '', 'utf-8');
+      await writeFile(filePath, resolvedContent ?? '');
+      const size = Buffer.byteLength(resolvedContent ?? '', 'utf-8');
       db.prepare(
         `INSERT INTO chat_files (id, conversation_id, message_id, name, mime_type, size, file_path, created_at)
          VALUES (@id, @conversation_id, @message_id, @name, @mime_type, @size, @file_path, @created_at)`
@@ -183,7 +212,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       id: assistantMessageId,
       conversation_id: conversationId,
       role: 'assistant',
-      content: fullResponse,
+      content: responseText,
       attachments: JSON.stringify(assistantAttachments),
       metadata: JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
       created_at: Date.now()
