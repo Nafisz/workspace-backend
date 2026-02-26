@@ -114,7 +114,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
         }
       : null;
     const fileInstruction = outputFileSpec
-      ? '\n\nJika perlu membuat file, gunakan format:\nRESPONSE:\n<tulisan jawaban singkat>\n\nFILE:\n<isi file lengkap>\n\nJangan menaruh isi file di bagian RESPONSE.'
+      ? '\n\nJika perlu membuat file, gunakan format:\nRESPONSE:\n<tulisan jawaban singkat>\n\nFILE:\n<isi file lengkap>\n\nJangan menaruh isi file di bagian RESPONSE.\nJangan gunakan tool call apapun.'
       : '';
     const systemPrompt = buildSystemPrompt(project, docs) + fileInstruction;
 
@@ -158,7 +158,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     const services: Array<'slack' | 'atlassian'> = [];
     if (integrations?.slack) services.push('slack');
     if (integrations?.jira || integrations?.confluence) services.push('atlassian');
-    const tools = services.length > 0 ? await mcpManager.getTools(services) : undefined;
+    const tools = outputFileSpec
+      ? undefined
+      : (services.length > 0 ? await mcpManager.getTools(services) : undefined);
     const settings = project.settings ? JSON.parse(project.settings) : {};
 
     let fullResponse = '';
@@ -168,7 +170,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
         messages: [...history, { role: 'user', content: body.content }],
         tools,
         model: settings.model,
-        toolExecutor: async (name, input) => mcpManager.executeTool(name, input)
+        toolExecutor: tools ? async (name, input) => mcpManager.executeTool(name, input) : undefined
       })) {
         if (event.type === 'text') {
           fullResponse += event.text;
