@@ -81,6 +81,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       if (content.toLowerCase().includes('python')) return 'script.py';
       if (content.toLowerCase().includes('javascript')) return 'script.js';
       if (content.toLowerCase().includes('typescript')) return 'script.ts';
+      if (content.toLowerCase().includes('markdown')) return 'document.md';
+      if (content.toLowerCase().includes('csv')) return 'data.csv';
+      if (content.toLowerCase().includes('json')) return 'data.json';
       return 'output.txt';
     };
     const inferMimeType = (name: string) => {
@@ -97,7 +100,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     };
     const wantsFile =
       Boolean(body.outputFile) ||
-      /buat(?:kan)?\s+file|hasilkan\s+file|generate\s+file|buat\s+script|script\s+python|python\s+script/i.test(body.content);
+      /file|script|kode|program|python|javascript|typescript|markdown|csv|json/i.test(body.content);
     const outputFileSpec = body.outputFile
       ? {
           name: body.outputFile.name ?? inferFileName(body.content),
@@ -199,68 +202,76 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       return { responseText, fileContent, hasFile: true };
     };
 
-    const parsedSections = outputFileSpec
-      ? extractFileSections(fullResponse)
-      : { responseText: fullResponse, fileContent: '', hasFile: false };
-    const responseText = outputFileSpec
-      ? (parsedSections.hasFile ? parsedSections.responseText : '')
-      : parsedSections.responseText;
-    const fileContent = outputFileSpec
-      ? (parsedSections.hasFile ? parsedSections.fileContent : fullResponse)
-      : parsedSections.fileContent;
-    if (outputFileSpec && responseText) {
-      reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: responseText })}\n\n`);
-    }
+    let responseText = fullResponse;
+    let fileContent = '';
+    try {
+      const parsedSections = outputFileSpec
+        ? extractFileSections(fullResponse)
+        : { responseText: fullResponse, fileContent: '', hasFile: false };
+      responseText = outputFileSpec
+        ? (parsedSections.hasFile ? parsedSections.responseText : '')
+        : parsedSections.responseText;
+      fileContent = outputFileSpec
+        ? (parsedSections.hasFile ? parsedSections.fileContent : fullResponse)
+        : parsedSections.fileContent;
+      if (outputFileSpec && responseText) {
+        reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: responseText })}\n\n`);
+      }
 
-    const assistantMessageId = uuidv4();
-    const assistantAttachments: Array<Record<string, unknown>> = [];
-    if (outputFileSpec) {
-      const fileId = uuidv4();
-      const fileName = outputFileSpec.name ?? `assistant-${fileId}.txt`;
-      const filePath = path.join(uploadDir, fileId);
-      const resolvedContent = outputFileSpec.content ?? fileContent ?? fullResponse;
-      const mimeType = outputFileSpec.mimeType ?? 'text/plain; charset=utf-8';
-      await writeFile(filePath, resolvedContent ?? '');
-      const size = Buffer.byteLength(resolvedContent ?? '', 'utf-8');
+      const assistantMessageId = uuidv4();
+      const assistantAttachments: Array<Record<string, unknown>> = [];
+      if (outputFileSpec) {
+        const fileId = uuidv4();
+        const fileName = outputFileSpec.name ?? `assistant-${fileId}.txt`;
+        const filePath = path.join(uploadDir, fileId);
+        const resolvedContent = outputFileSpec.content ?? fileContent ?? fullResponse;
+        const mimeType = outputFileSpec.mimeType ?? 'text/plain; charset=utf-8';
+        await writeFile(filePath, resolvedContent ?? '');
+        const size = Buffer.byteLength(resolvedContent ?? '', 'utf-8');
+        db.prepare(
+          `INSERT INTO chat_files (id, conversation_id, message_id, name, mime_type, size, file_path, created_at)
+           VALUES (@id, @conversation_id, @message_id, @name, @mime_type, @size, @file_path, @created_at)`
+        ).run({
+          id: fileId,
+          conversation_id: conversationId,
+          message_id: assistantMessageId,
+          name: fileName,
+          mime_type: mimeType,
+          size,
+          file_path: filePath,
+          created_at: Date.now()
+        });
+        const filePayload = {
+          type: 'file',
+          id: fileId,
+          name: fileName,
+          mimeType,
+          size,
+          url: `/api/conversations/${conversationId}/files/${fileId}`
+        };
+        assistantAttachments.push(filePayload);
+        reply.raw.write(`data: ${JSON.stringify({ type: 'file', file: filePayload })}\n\n`);
+      }
       db.prepare(
-        `INSERT INTO chat_files (id, conversation_id, message_id, name, mime_type, size, file_path, created_at)
-         VALUES (@id, @conversation_id, @message_id, @name, @mime_type, @size, @file_path, @created_at)`
+        `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, created_at)
+         VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @created_at)`
       ).run({
-        id: fileId,
+        id: assistantMessageId,
         conversation_id: conversationId,
-        message_id: assistantMessageId,
-        name: fileName,
-        mime_type: mimeType,
-        size,
-        file_path: filePath,
+        role: 'assistant',
+        content: responseText,
+        attachments: JSON.stringify(assistantAttachments),
+        metadata: JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
         created_at: Date.now()
       });
-      const filePayload = {
-        type: 'file',
-        id: fileId,
-        name: fileName,
-        mimeType,
-        size,
-        url: `/api/conversations/${conversationId}/files/${fileId}`
-      };
-      assistantAttachments.push(filePayload);
-      reply.raw.write(`data: ${JSON.stringify({ type: 'file', file: filePayload })}\n\n`);
+    } catch (error: any) {
+      reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: error?.message ?? 'file generation error' })}\n\n`);
     }
-    db.prepare(
-      `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, created_at)
-       VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @created_at)`
-    ).run({
-      id: assistantMessageId,
-      conversation_id: conversationId,
-      role: 'assistant',
-      content: responseText,
-      attachments: JSON.stringify(assistantAttachments),
-      metadata: JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
-      created_at: Date.now()
-    });
 
     db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?').run(Date.now(), conversationId);
-    reply.raw.end();
+    if (!reply.raw.writableEnded) {
+      reply.raw.end();
+    }
   });
 
   app.put('/conversations/:id', async (req, reply) => {
