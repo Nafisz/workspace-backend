@@ -75,7 +75,42 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     if (!project) return reply.status(404).send({ error: 'project not found' });
 
     const docs = db.prepare('SELECT * FROM documents WHERE project_id = ?').all(project.id) as any[];
-    const fileInstruction = body.outputFile
+    const inferFileName = (content: string) => {
+      const match = content.match(/([a-zA-Z0-9._-]+\.(py|js|ts|md|txt|json|csv|html|css))/i);
+      if (match?.[1]) return match[1];
+      if (content.toLowerCase().includes('python')) return 'script.py';
+      if (content.toLowerCase().includes('javascript')) return 'script.js';
+      if (content.toLowerCase().includes('typescript')) return 'script.ts';
+      return 'output.txt';
+    };
+    const inferMimeType = (name: string) => {
+      const lower = name.toLowerCase();
+      if (lower.endsWith('.py')) return 'text/x-python; charset=utf-8';
+      if (lower.endsWith('.js')) return 'text/javascript; charset=utf-8';
+      if (lower.endsWith('.ts')) return 'text/plain; charset=utf-8';
+      if (lower.endsWith('.md')) return 'text/markdown; charset=utf-8';
+      if (lower.endsWith('.json')) return 'application/json; charset=utf-8';
+      if (lower.endsWith('.csv')) return 'text/csv; charset=utf-8';
+      if (lower.endsWith('.html')) return 'text/html; charset=utf-8';
+      if (lower.endsWith('.css')) return 'text/css; charset=utf-8';
+      return 'text/plain; charset=utf-8';
+    };
+    const wantsFile =
+      Boolean(body.outputFile) ||
+      /buat(?:kan)?\s+file|hasilkan\s+file|generate\s+file|buat\s+script|script\s+python|python\s+script/i.test(body.content);
+    const outputFileSpec = body.outputFile
+      ? {
+          name: body.outputFile.name ?? inferFileName(body.content),
+          mimeType: body.outputFile.mimeType ?? inferMimeType(body.outputFile.name ?? inferFileName(body.content)),
+          content: body.outputFile.content
+        }
+      : wantsFile
+      ? {
+          name: inferFileName(body.content),
+          mimeType: inferMimeType(inferFileName(body.content))
+        }
+      : null;
+    const fileInstruction = outputFileSpec
       ? '\n\nJika perlu membuat file, gunakan format:\nRESPONSE:\n<tulisan jawaban singkat>\n\nFILE:\n<isi file lengkap>\n\nJangan menaruh isi file di bagian RESPONSE.'
       : '';
     const systemPrompt = buildSystemPrompt(project, docs) + fileInstruction;
@@ -134,7 +169,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       })) {
         if (event.type === 'text') {
           fullResponse += event.text;
-          if (!body.outputFile) {
+          if (!outputFileSpec) {
             reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: event.text })}\n\n`);
           }
         } else if (event.type === 'tool_use') {
@@ -152,7 +187,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       const responseMarker = /(^|\n)RESPONSE:\s*/i;
       const fileIndex = text.search(fileMarker);
       if (fileIndex === -1) {
-        return { responseText: text.replace(responseMarker, '').trim(), fileContent: '' };
+        return { responseText: text.replace(responseMarker, '').trim(), fileContent: '', hasFile: false };
       }
       const responseText = text
         .slice(0, fileIndex)
@@ -161,24 +196,30 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       const filePart = text.slice(fileIndex).replace(fileMarker, '').trim();
       const fenceMatch = filePart.match(/```(?:[^\n]*)\n([\s\S]*?)```/);
       const fileContent = fenceMatch ? fenceMatch[1].trim() : filePart;
-      return { responseText, fileContent };
+      return { responseText, fileContent, hasFile: true };
     };
 
-    const { responseText, fileContent } = body.outputFile
+    const parsedSections = outputFileSpec
       ? extractFileSections(fullResponse)
-      : { responseText: fullResponse, fileContent: '' };
-    if (body.outputFile && responseText) {
+      : { responseText: fullResponse, fileContent: '', hasFile: false };
+    const responseText = outputFileSpec
+      ? (parsedSections.hasFile ? parsedSections.responseText : '')
+      : parsedSections.responseText;
+    const fileContent = outputFileSpec
+      ? (parsedSections.hasFile ? parsedSections.fileContent : fullResponse)
+      : parsedSections.fileContent;
+    if (outputFileSpec && responseText) {
       reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: responseText })}\n\n`);
     }
 
     const assistantMessageId = uuidv4();
     const assistantAttachments: Array<Record<string, unknown>> = [];
-    if (body.outputFile) {
+    if (outputFileSpec) {
       const fileId = uuidv4();
-      const fileName = body.outputFile.name ?? `assistant-${fileId}.txt`;
+      const fileName = outputFileSpec.name ?? `assistant-${fileId}.txt`;
       const filePath = path.join(uploadDir, fileId);
-      const resolvedContent = body.outputFile.content ?? fileContent ?? fullResponse;
-      const mimeType = body.outputFile.mimeType ?? 'text/plain; charset=utf-8';
+      const resolvedContent = outputFileSpec.content ?? fileContent ?? fullResponse;
+      const mimeType = outputFileSpec.mimeType ?? 'text/plain; charset=utf-8';
       await writeFile(filePath, resolvedContent ?? '');
       const size = Buffer.byteLength(resolvedContent ?? '', 'utf-8');
       db.prepare(
