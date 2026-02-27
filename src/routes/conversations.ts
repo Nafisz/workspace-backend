@@ -79,9 +79,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       const lowerContent = content.toLowerCase();
       const match = content.match(/([a-zA-Z0-9._-]+\.(py|js|ts|md|txt|json|csv|html|css))/i);
       if (match?.[1]) return match[1];
-      if (lowerContent.includes('python')) return 'script.py';
-      if (lowerContent.includes('javascript')) return 'script.js';
-      if (lowerContent.includes('typescript')) return 'script.ts';
+      if (lowerContent.includes('.py') || lowerContent.includes('python')) return 'script.py';
+      if (lowerContent.includes('.js') || lowerContent.includes('javascript')) return 'script.js';
+      if (lowerContent.includes('.ts') || lowerContent.includes('typescript')) return 'script.ts';
       if (lowerContent.includes('markdown') || lowerContent.includes('.md')) return 'document.md';
       if (lowerContent.includes('pdf')) return 'document.md';
       if (lowerContent.includes('xlsx') || lowerContent.includes('excel') || lowerContent.includes('spreadsheet')) {
