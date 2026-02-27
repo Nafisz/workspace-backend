@@ -76,14 +76,16 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
 
     const docs = db.prepare('SELECT * FROM documents WHERE project_id = ?').all(project.id) as any[];
     const inferFileName = (content: string) => {
+      const lowerContent = content.toLowerCase();
       const match = content.match(/([a-zA-Z0-9._-]+\.(py|js|ts|md|txt|json|csv|html|css))/i);
       if (match?.[1]) return match[1];
-      if (content.toLowerCase().includes('python')) return 'script.py';
-      if (content.toLowerCase().includes('javascript')) return 'script.js';
-      if (content.toLowerCase().includes('typescript')) return 'script.ts';
-      if (content.toLowerCase().includes('markdown')) return 'document.md';
-      if (content.toLowerCase().includes('csv')) return 'data.csv';
-      if (content.toLowerCase().includes('json')) return 'data.json';
+      if (lowerContent.includes('python')) return 'script.py';
+      if (lowerContent.includes('javascript')) return 'script.js';
+      if (lowerContent.includes('typescript')) return 'script.ts';
+      if (lowerContent.includes('markdown') || lowerContent.includes('.md')) return 'document.md';
+      if (lowerContent.includes('csv')) return 'data.csv';
+      if (lowerContent.includes('json')) return 'data.json';
+      if (lowerContent.includes('dokumen') || lowerContent.includes('document')) return 'document.md';
       return 'output.txt';
     };
     const inferMimeType = (name: string) => {
