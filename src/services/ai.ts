@@ -25,7 +25,15 @@ export function buildSystemPrompt(project: any, projectDocs: any[]) {
     day: 'numeric'
   });
 
-  return `${basePrompt}\n\n${knowledge}\n\nHari ini: ${dateString}`.trim();
+  const platformInstruction = [
+    'Konteks platform:',
+    '- Jika diminta membuat/menyimpan file, file harus disimpan ke platform (bukan ke komputer lokal).',
+    '- Respons chat dan file harus dipisah: file tidak ditaruh di bubble chat.',
+    '- Jika diminta format file, gunakan format teks yang sesuai (.md, .txt, .csv, .json, .html, .css, .py, .js, .ts).',
+    '- Jika pengguna menyebut Excel/XLSX, gunakan CSV. Jika menyebut PDF, gunakan Markdown atau TXT.'
+  ].join('\n');
+
+  return `${basePrompt}\n\n${knowledge}\n\n${platformInstruction}\n\nHari ini: ${dateString}`.trim();
 }
 
 type StreamEvent =

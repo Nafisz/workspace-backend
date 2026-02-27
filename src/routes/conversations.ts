@@ -83,6 +83,10 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       if (lowerContent.includes('javascript')) return 'script.js';
       if (lowerContent.includes('typescript')) return 'script.ts';
       if (lowerContent.includes('markdown') || lowerContent.includes('.md')) return 'document.md';
+      if (lowerContent.includes('pdf')) return 'document.md';
+      if (lowerContent.includes('xlsx') || lowerContent.includes('excel') || lowerContent.includes('spreadsheet')) {
+        return 'data.csv';
+      }
       if (lowerContent.includes('csv')) return 'data.csv';
       if (lowerContent.includes('json')) return 'data.json';
       if (lowerContent.includes('dokumen') || lowerContent.includes('document')) return 'document.md';
@@ -102,7 +106,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     };
     const wantsFile =
       Boolean(body.outputFile) ||
-      /file|script|kode|program|python|javascript|typescript|markdown|csv|json/i.test(body.content);
+      /file|script|kode|program|python|javascript|typescript|markdown|csv|json|pdf|xlsx|excel|spreadsheet|simpan|download|export|hasilkan/i.test(
+        body.content
+      );
     const outputFileSpec = body.outputFile
       ? {
           name: body.outputFile.name ?? inferFileName(body.content),
