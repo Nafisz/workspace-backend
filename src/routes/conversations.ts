@@ -162,10 +162,13 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     reply.raw.setHeader('Connection', 'keep-alive');
     reply.raw.flushHeaders?.();
 
-    const integrations = project.integrations ? JSON.parse(project.integrations) : {};
+    const globalIntegrations = db.prepare('SELECT * FROM integration_configs WHERE id = ?').get('singleton') as any;
+    const slack = globalIntegrations?.slack ? JSON.parse(globalIntegrations.slack) : {};
+    const jira = globalIntegrations?.jira ? JSON.parse(globalIntegrations.jira) : {};
+    const confluence = globalIntegrations?.confluence ? JSON.parse(globalIntegrations.confluence) : {};
     const services: Array<'slack' | 'atlassian'> = [];
-    if (integrations?.slack) services.push('slack');
-    if (integrations?.jira || integrations?.confluence) services.push('atlassian');
+    if (slack?.enabled) services.push('slack');
+    if (jira?.enabled || confluence?.enabled) services.push('atlassian');
     const tools = outputFileSpec
       ? undefined
       : (services.length > 0 ? await mcpManager.getTools(services) : undefined);

@@ -6,8 +6,7 @@ import { getDb } from '../db/client.js';
 function parseProject(row: any) {
   return {
     ...row,
-    settings: row.settings ? JSON.parse(row.settings) : {},
-    integrations: row.integrations ? JSON.parse(row.integrations) : {}
+    settings: row.settings ? JSON.parse(row.settings) : {}
   };
 }
 
@@ -35,10 +34,9 @@ export default fp(async function projectsRoutes(app: FastifyInstance) {
     const now = Date.now();
     const id = uuidv4();
     const settings = JSON.stringify(body.settings ?? {});
-    const integrations = JSON.stringify(body.integrations ?? {});
     db.prepare(
-      `INSERT INTO projects (id, name, description, icon, color, system_prompt, settings, integrations, created_at, updated_at)
-       VALUES (@id, @name, @description, @icon, @color, @system_prompt, @settings, @integrations, @created_at, @updated_at)`
+      `INSERT INTO projects (id, name, description, icon, color, system_prompt, settings, created_at, updated_at)
+       VALUES (@id, @name, @description, @icon, @color, @system_prompt, @settings, @created_at, @updated_at)`
     ).run({
       id,
       name: body.name,
@@ -47,7 +45,6 @@ export default fp(async function projectsRoutes(app: FastifyInstance) {
       color: body.color ?? '#6366f1',
       system_prompt: body.system_prompt ?? '',
       settings,
-      integrations,
       created_at: now,
       updated_at: now
     });
@@ -77,7 +74,6 @@ export default fp(async function projectsRoutes(app: FastifyInstance) {
       color?: string;
       system_prompt?: string;
       settings?: Record<string, unknown>;
-      integrations?: Record<string, unknown>;
     };
     const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
     if (!existing) return reply.status(404).send({ error: 'not found' });
@@ -89,14 +85,13 @@ export default fp(async function projectsRoutes(app: FastifyInstance) {
       color: body.color ?? existing.color,
       system_prompt: body.system_prompt ?? existing.system_prompt,
       settings: JSON.stringify(body.settings ?? JSON.parse(existing.settings ?? '{}')),
-      integrations: JSON.stringify(body.integrations ?? JSON.parse(existing.integrations ?? '{}')),
       updated_at: now,
       id
     };
     db.prepare(
       `UPDATE projects
        SET name=@name, description=@description, icon=@icon, color=@color,
-           system_prompt=@system_prompt, settings=@settings, integrations=@integrations, updated_at=@updated_at
+           system_prompt=@system_prompt, settings=@settings, updated_at=@updated_at
        WHERE id=@id`
     ).run(updated);
     const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;

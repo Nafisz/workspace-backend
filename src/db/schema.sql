@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS projects (
   color TEXT DEFAULT '#6366f1',
   system_prompt TEXT DEFAULT '',
   settings TEXT DEFAULT '{}',
-  integrations TEXT DEFAULT '{}',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
