@@ -14,6 +14,7 @@ import integrationsRoutes from './routes/integrations.js';
 import coworkRoutes from './routes/cowork.js';
 import authRoutes from './routes/auth.js';
 import registerWs from './ws/handler.js';
+import { startSummarizerService } from './services/summarizer.js';
 
 const server = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? 'info' },
@@ -106,3 +107,5 @@ const port = Number(process.env.PORT) || 8080;
 const host = process.env.HOST || '0.0.0.0';
 
 await server.listen({ port, host });
+
+startSummarizerService();

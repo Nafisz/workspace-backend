@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
+  summary TEXT,
+  last_activity_at INTEGER,
   is_starred INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -39,6 +41,8 @@ CREATE TABLE IF NOT EXISTS messages (
   content TEXT NOT NULL,
   attachments TEXT DEFAULT '[]',
   metadata TEXT DEFAULT '{}',
+  category TEXT DEFAULT 'normal',
+  is_summarized INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 

@@ -10,7 +10,7 @@ const defaultModel =
   process.env.OPENAI_MODEL ||
   'accounts/fireworks/models/minimax-m2p5';
 
-export function buildSystemPrompt(project: any, projectDocs: any[]) {
+export function buildSystemPrompt(project: any, projectDocs: any[], userName?: string) {
   const docsContext = projectDocs
     .filter((doc) => doc.content)
     .map((doc) => `## ${doc.name}\n${doc.content}`)
@@ -25,6 +25,8 @@ export function buildSystemPrompt(project: any, projectDocs: any[]) {
     day: 'numeric'
   });
 
+  const userContext = userName ? `Anda sedang berbicara dengan ${userName}. Ingatlah siapa yang berbicara dengan Anda.` : '';
+
   const platformInstruction = [
     'Konteks platform:',
     '- Jika diminta membuat/menyimpan file, file harus disimpan ke platform (bukan ke komputer lokal).',
@@ -33,7 +35,7 @@ export function buildSystemPrompt(project: any, projectDocs: any[]) {
     '- Jika pengguna menyebut Excel/XLSX, gunakan CSV. Jika menyebut PDF, gunakan Markdown atau TXT.'
   ].join('\n');
 
-  return `${basePrompt}\n\n${knowledge}\n\n${platformInstruction}\n\nHari ini: ${dateString}`.trim();
+  return `${basePrompt}\n\n${knowledge}\n\n${userContext}\n\n${platformInstruction}\n\nHari ini: ${dateString}`.trim();
 }
 
 type StreamEvent =

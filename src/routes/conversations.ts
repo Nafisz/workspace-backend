@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/client.js';
 import { buildSystemPrompt, streamMessageWithTools } from '../services/ai.js';
 import { mcpManager } from '../services/mcp.js';
+import { classifyMessage } from '../services/summarizer.js';
 
 export default fp(async function conversationsRoutes(app: FastifyInstance) {
   const db = getDb();
@@ -74,6 +75,17 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(convo.project_id) as any;
     if (!project) return reply.status(404).send({ error: 'project not found' });
 
+    const token = (req.headers.authorization as string)?.replace('Bearer ', '') || (req.query as any)?.token;
+    let userName: string | undefined;
+    if (token) {
+      const session = db.prepare(
+        `SELECT u.name FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = ?`
+      ).get(token) as { name: string } | undefined;
+      if (session?.name) {
+        userName = session.name;
+      }
+    }
+
     const docs = db.prepare('SELECT * FROM documents WHERE project_id = ?').all(project.id) as any[];
     const inferFileName = (content: string) => {
       const lowerContent = content.toLowerCase();
@@ -124,7 +136,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     const fileInstruction = outputFileSpec
       ? '\n\nJika perlu membuat file, gunakan format:\nRESPONSE:\n<tulisan jawaban singkat>\n\nFILE:\n<isi file lengkap>\n\nJangan menaruh isi file di bagian RESPONSE.\nJangan gunakan tool call apapun.'
       : '';
-    const systemPrompt = buildSystemPrompt(project, docs) + fileInstruction;
+    const systemPrompt = buildSystemPrompt(project, docs, userName) + fileInstruction;
 
     const historyRows = db.prepare(
       `SELECT * FROM messages WHERE conversation_id = ?
@@ -136,9 +148,10 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
 
     const now = Date.now();
     const userMessageId = uuidv4();
+    const messageCategory = classifyMessage(body.content);
     db.prepare(
-      `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, created_at)
-       VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @created_at)`
+      `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, category, created_at)
+       VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @category, @created_at)`
     ).run({
       id: userMessageId,
       conversation_id: conversationId,
@@ -146,10 +159,11 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       content: body.content,
       attachments: JSON.stringify(body.attachments ?? []),
       metadata: JSON.stringify({}),
+      category: messageCategory,
       created_at: now
     });
 
-    db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?').run(Date.now(), conversationId);
+    db.prepare('UPDATE conversations SET updated_at = ?, last_activity_at = ? WHERE id = ?').run(Date.now(), now, conversationId);
 
     const origin = req.headers.origin;
     if (origin) {
@@ -233,9 +247,10 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
 
       const assistantMessageId = uuidv4();
       const assistantAttachments: Array<Record<string, unknown>> = [];
+      const assistantCategory = classifyMessage(responseText);
       db.prepare(
-        `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, created_at)
-         VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @created_at)`
+        `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, category, created_at)
+         VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @category, @created_at)`
       ).run({
         id: assistantMessageId,
         conversation_id: conversationId,
@@ -243,6 +258,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
         content: responseText,
         attachments: JSON.stringify([]),
         metadata: JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
+        category: assistantCategory,
         created_at: Date.now()
       });
       if (outputFileSpec) {
