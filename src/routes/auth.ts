@@ -64,6 +64,16 @@ export default fp(async function authRoutes(app: FastifyInstance) {
     return { token, user: sanitizeUser(user) };
   });
 
+  app.post('/auth/check-email', async (req, reply) => {
+    const body = req.body as { email?: string };
+    const email = body?.email?.trim().toLowerCase();
+    if (!email) {
+      return reply.status(400).send({ error: 'email is required' });
+    }
+    const user = db.prepare('SELECT id, email, name, role FROM users WHERE email = ?').get(email);
+    return { exists: !!user, user: user || null };
+  });
+
   app.post('/auth/logout', async (req) => {
     const auth = getAuthContext(req);
     if (auth?.sessionId) {
