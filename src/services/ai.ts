@@ -35,7 +35,9 @@ export function buildSystemPrompt(project: any, projectDocs: any[], userName?: s
     '- Jika pengguna menyebut Excel/XLSX, gunakan CSV. Jika menyebut PDF, gunakan Markdown atau TXT.'
   ].join('\n');
 
-  return `${basePrompt}\n\n${knowledge}\n\n${userContext}\n\n${platformInstruction}\n\nHari ini: ${dateString}`.trim();
+  const honestyInstruction = 'Jawablah dengan jujur. Jika tidak yakin atau tidak tahu, katakan saja.';
+
+  return `${basePrompt}\n\n${knowledge}\n\n${userContext}\n\n${platformInstruction}\n\n${honestyInstruction}\n\nHari ini: ${dateString}`.trim();
 }
 
 type StreamEvent =
