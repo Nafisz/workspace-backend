@@ -17,7 +17,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     const { id: projectId } = req.params as { id: string };
     const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
     if (!project) return reply.status(404).send({ error: 'project not found' });
-    const convos = db.prepare('SELECT * FROM conversations WHERE project_id = ? ORDER BY updated_at DESC').all(projectId);
+    const convos = db.prepare(
+      'SELECT * FROM conversations WHERE project_id = ? ORDER BY COALESCE(last_activity_at, created_at) DESC, created_at DESC'
+    ).all(projectId);
     return convos;
   });
 
@@ -312,9 +314,8 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     const body = req.body as { title?: string };
     const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) as any;
     if (!convo) return reply.status(404).send({ error: 'conversation not found' });
-    const now = Date.now();
     const title = body?.title ?? convo.title;
-    db.prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?').run(title, now, id);
+    db.prepare('UPDATE conversations SET title = ? WHERE id = ?').run(title, id);
     const row = db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) as any;
     return row;
   });

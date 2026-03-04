@@ -57,7 +57,9 @@ export default fp(async function projectsRoutes(app: FastifyInstance) {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
     if (!project) return reply.status(404).send({ error: 'not found' });
     const docs = db.prepare('SELECT * FROM documents WHERE project_id = ? ORDER BY uploaded_at DESC').all(id);
-    const convos = db.prepare('SELECT * FROM conversations WHERE project_id = ? ORDER BY updated_at DESC').all(id);
+    const convos = db.prepare(
+      'SELECT * FROM conversations WHERE project_id = ? ORDER BY COALESCE(last_activity_at, created_at) DESC, created_at DESC'
+    ).all(id);
     return {
       ...parseProject(project),
       documents: docs.map((d: any) => ({ ...d, metadata: d.metadata ? JSON.parse(d.metadata) : {} })),
