@@ -133,4 +133,54 @@ export default fp(async function authRoutes(app: FastifyInstance) {
     });
     return { user: { id, email, name: body?.name ?? null, role } };
   });
+
+  app.post('/auth/update-profile', async (req, reply) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+    const body = req.body as { name?: string };
+    if (!body?.name?.trim()) {
+      return reply.status(400).send({ error: 'name is required' });
+    }
+    db.prepare('UPDATE users SET name = ? WHERE id = ?').run(body.name.trim(), auth.user.id);
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(auth.user.id);
+    return { user: sanitizeUser(user) };
+  });
+
+  app.post('/auth/complete-profile', async (req, reply) => {
+    const body = req.body as { email?: string; password?: string; name?: string };
+    const email = body?.email?.trim().toLowerCase();
+    const password = body?.password ?? '';
+    const name = body?.name?.trim();
+    if (!email || !password || !name) {
+      return reply.status(400).send({ error: 'email, password, and name are required' });
+    }
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
+    if (!user) {
+      return reply.status(404).send({ error: 'user not found' });
+    }
+    if (!verifyPassword(password, user.password_hash)) {
+      return reply.status(401).send({ error: 'invalid credentials' });
+    }
+    db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, user.id);
+    const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    const now = Date.now();
+    const sessionId = uuidv4();
+    const token = createToken();
+    const expiresAt = now + 7 * 24 * 60 * 60 * 1000;
+    db.prepare(
+      `INSERT INTO sessions (id, user_id, token, created_at, last_used_at, expires_at)
+       VALUES (@id, @user_id, @token, @created_at, @last_used_at, @expires_at)`
+    ).run({
+      id: sessionId,
+      user_id: user.id,
+      token,
+      created_at: now,
+      last_used_at: now,
+      expires_at: expiresAt
+    });
+    db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now, user.id);
+    return { token, user: sanitizeUser(updatedUser) };
+  });
 });
