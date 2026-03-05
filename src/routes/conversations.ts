@@ -119,6 +119,42 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       if (lower.endsWith('.css')) return 'text/css; charset=utf-8';
       return 'text/plain; charset=utf-8';
     };
+    const normalizeRequestedName = (requestedName: string | undefined, actualName: string | undefined) => {
+      const trimmedRequested = (requestedName ?? '').trim();
+      const trimmedActual = (actualName ?? '').trim();
+      if (!trimmedRequested) return trimmedActual || 'output.txt';
+      if (!trimmedActual) return trimmedRequested;
+      const requestedExtMatch = trimmedRequested.toLowerCase().match(/(\.[a-z0-9]+)$/);
+      const requestedExt = requestedExtMatch?.[1] ?? '';
+      const actualHasRequestedExt = requestedExt && trimmedActual.toLowerCase().endsWith(requestedExt);
+      if (requestedExt && !actualHasRequestedExt) {
+        const base = trimmedActual.replace(/\.[a-z0-9]+$/i, '');
+        return `${base}${requestedExt}`;
+      }
+      return trimmedActual;
+    };
+    const isMarkdownFile = (name: string, mimeType?: string) =>
+      name.toLowerCase().endsWith('.md') || mimeType?.toLowerCase().includes('markdown');
+    const isBinaryFile = (name: string, mimeType?: string) => {
+      const lower = name.toLowerCase();
+      if (lower.endsWith('.docx') || lower.endsWith('.xlsx') || lower.endsWith('.pptx')) return true;
+      if (mimeType && !mimeType.startsWith('text/')) return true;
+      return false;
+    };
+    const shouldPreviewMarkdown = (name: string, mimeType?: string) => isMarkdownFile(name, mimeType);
+    const decodeBinaryContent = (content: string) => {
+      const trimmed = content.trim();
+      if (!trimmed) return Buffer.from('', 'utf-8');
+      const base64Like = /^[A-Za-z0-9+/=\s]+$/.test(trimmed) && trimmed.length % 4 === 0;
+      if (base64Like) {
+        try {
+          return Buffer.from(trimmed, 'base64');
+        } catch {
+          return Buffer.from(trimmed, 'utf-8');
+        }
+      }
+      return Buffer.from(trimmed, 'utf-8');
+    };
     const wantsFile =
       Boolean(body.outputFile) ||
       /file|script|kode|program|python|javascript|typescript|markdown|csv|json|pdf|xlsx|excel|spreadsheet|simpan|download|export|hasilkan/i.test(
@@ -237,7 +273,8 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     const previewFileId = uuidv4();
     let lastPreviewFileContent = '';
     let presentedResponseText = '';
-    let presentedFiles: Array<{ name: string; content: string; mimeType?: string }> = [];
+    let presentedFilePayloads: Array<Record<string, unknown>> = [];
+    let usedPresentFiles = false;
 
     let fullResponse = '';
     try {
@@ -249,6 +286,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
         toolExecutor: tools
           ? async (name, input) => {
               if (outputFileSpec && name === 'present_files') {
+                usedPresentFiles = true;
                 const payload = (input && typeof input === 'object') ? (input as any) : {};
                 const response = typeof payload.response === 'string' ? payload.response.trim() : '';
                 if (response) {
@@ -264,17 +302,41 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
                   }))
                   .filter((file: any) => file.name && file.content.length > 0);
                 if (nextFiles.length > 0) {
-                  presentedFiles = nextFiles;
-                  const latest = nextFiles[nextFiles.length - 1];
-                  if (latest.content !== lastPreviewFileContent) {
-                    lastPreviewFileContent = latest.content;
+                  presentedFilePayloads = [];
+                  for (const file of nextFiles) {
+                    const normalizedName = normalizeRequestedName(outputFileSpec.name, file.name);
+                    const resolvedMimeType = file.mimeType ?? outputFileSpec.mimeType ?? inferMimeType(normalizedName);
+                    const binary = isBinaryFile(normalizedName, resolvedMimeType);
+                    const fileId = uuidv4();
+                    const filePath = path.join(uploadDir, fileId);
+                    const resolvedContent = binary ? decodeBinaryContent(file.content) : file.content;
+                    await writeFile(filePath, resolvedContent as any);
+                    const size = Buffer.isBuffer(resolvedContent)
+                      ? resolvedContent.length
+                      : Buffer.byteLength(String(resolvedContent ?? ''), 'utf-8');
+                    const payloadFile: Record<string, unknown> = {
+                      type: 'file',
+                      id: fileId,
+                      name: normalizedName || `assistant-${fileId}.txt`,
+                      mimeType: resolvedMimeType || 'text/plain; charset=utf-8',
+                      size,
+                      url: `/api/conversations/${conversationId}/files/${fileId}`,
+                    };
+                    if (shouldPreviewMarkdown(normalizedName, resolvedMimeType) && typeof file.content === 'string') {
+                      payloadFile.content = file.content;
+                    }
+                    presentedFilePayloads.push(payloadFile);
+                  }
+                  const latest = presentedFilePayloads[presentedFilePayloads.length - 1] as any;
+                  if (latest?.content && latest.content !== lastPreviewFileContent) {
+                    lastPreviewFileContent = String(latest.content);
                     reply.raw.write(
                       `data: ${JSON.stringify({
                         type: 'file_preview',
                         file: {
-                          id: previewFileId,
-                          name: latest.name || outputFileSpec.name || `assistant-${previewFileId}.txt`,
-                          mimeType: latest.mimeType || outputFileSpec.mimeType || 'text/plain; charset=utf-8'
+                          id: latest.id,
+                          name: latest.name,
+                          mimeType: latest.mimeType
                         },
                         content: latest.content,
                         done: false
@@ -282,7 +344,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
                     );
                   }
                 }
-                return { ok: true, files: nextFiles.length };
+                return { response: presentedResponseText, files: presentedFilePayloads };
               }
               return mcpManager.executeTool(name, input);
             }
@@ -293,25 +355,29 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
           if (!outputFileSpec) {
             reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: event.text })}\n\n`);
           } else {
-            const parsedSections = extractFileSections(fullResponse);
-            if (parsedSections.hasFile && parsedSections.fileContent !== lastPreviewFileContent) {
-              lastPreviewFileContent = parsedSections.fileContent;
-              reply.raw.write(
-                `data: ${JSON.stringify({
-                  type: 'file_preview',
-                  file: {
-                    id: previewFileId,
-                    name: outputFileSpec.name ?? `assistant-${previewFileId}.txt`,
-                    mimeType: outputFileSpec.mimeType ?? 'text/plain; charset=utf-8'
-                  },
-                  content: parsedSections.fileContent,
-                  done: false
-                })}\n\n`
-              );
+            if (!usedPresentFiles && outputFileSpec && shouldPreviewMarkdown(outputFileSpec.name ?? '', outputFileSpec.mimeType)) {
+              const parsedSections = extractFileSections(fullResponse);
+              if (parsedSections.hasFile && parsedSections.fileContent !== lastPreviewFileContent) {
+                lastPreviewFileContent = parsedSections.fileContent;
+                reply.raw.write(
+                  `data: ${JSON.stringify({
+                    type: 'file_preview',
+                    file: {
+                      id: previewFileId,
+                      name: outputFileSpec.name ?? `assistant-${previewFileId}.txt`,
+                      mimeType: outputFileSpec.mimeType ?? 'text/plain; charset=utf-8'
+                    },
+                    content: parsedSections.fileContent,
+                    done: false
+                  })}\n\n`
+                );
+              }
             }
           }
         } else if (event.type === 'tool_use') {
           reply.raw.write(`data: ${JSON.stringify({ type: 'tool_use', name: event.name })}\n\n`);
+        } else if (event.type === 'tool_result') {
+          reply.raw.write(`data: ${JSON.stringify({ type: 'tool_result', name: event.name, content: event.output })}\n\n`);
         }
       }
     } catch (error: any) {
@@ -334,22 +400,10 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       fileContent = outputFileSpec
         ? (parsedSections.hasFile ? parsedSections.fileContent : fullResponse)
         : parsedSections.fileContent;
-      if (outputFileSpec && presentedFiles.length > 0) {
-        const requestedName = (outputFileSpec.name ?? '').trim().toLowerCase();
-        const selectedFile =
-          presentedFiles.find((file) => file.name.trim().toLowerCase() === requestedName) ??
-          presentedFiles[presentedFiles.length - 1];
-        const requestedExtMatch = (outputFileSpec.name ?? '').toLowerCase().match(/(\.[a-z0-9]+)$/);
-        const requestedExt = requestedExtMatch?.[1] ?? '';
-        const selectedName = selectedFile.name.trim() || resolvedName;
-        if (requestedExt && !selectedName.toLowerCase().endsWith(requestedExt)) {
-          const selectedBase = selectedName.replace(/\.[a-z0-9]+$/i, '');
-          resolvedName = `${selectedBase}${requestedExt}`;
-        } else {
-          resolvedName = selectedName;
-        }
-        resolvedMimeType = selectedFile.mimeType ?? outputFileSpec.mimeType ?? inferMimeType(resolvedName);
-        fileContent = selectedFile.content;
+      if (outputFileSpec && presentedFilePayloads.length > 0) {
+        const lastPayload = presentedFilePayloads[presentedFilePayloads.length - 1] as any;
+        resolvedName = String(lastPayload?.name ?? resolvedName);
+        resolvedMimeType = String(lastPayload?.mimeType ?? resolvedMimeType);
         responseText = presentedResponseText || responseText || `File ${resolvedName} berhasil dibuat.`;
       } else if (outputFileSpec) {
         const fallbackText = fullResponse.trim();
@@ -380,14 +434,24 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
         category: assistantCategory,
         created_at: Date.now()
       });
-      if (outputFileSpec) {
+      if (outputFileSpec && presentedFilePayloads.length > 0) {
+        assistantAttachments.push(...presentedFilePayloads);
+        db.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(
+          JSON.stringify(assistantAttachments),
+          assistantMessageId
+        );
+      } else if (outputFileSpec) {
         const fileId = uuidv4();
         const fileName = resolvedName;
         const filePath = path.join(uploadDir, fileId);
         const resolvedContent = outputFileSpec.content ?? fileContent ?? fullResponse;
         const mimeType = resolvedMimeType || 'text/plain; charset=utf-8';
-        await writeFile(filePath, resolvedContent ?? '');
-        const size = Buffer.byteLength(resolvedContent ?? '', 'utf-8');
+        const binary = isBinaryFile(fileName, mimeType);
+        const writeContent = binary ? decodeBinaryContent(String(resolvedContent ?? '')) : (resolvedContent ?? '');
+        await writeFile(filePath, writeContent as any);
+        const size = Buffer.isBuffer(writeContent)
+          ? writeContent.length
+          : Buffer.byteLength(String(writeContent ?? ''), 'utf-8');
         db.prepare(
           `INSERT INTO chat_files (id, conversation_id, message_id, name, mime_type, size, file_path, created_at)
            VALUES (@id, @conversation_id, @message_id, @name, @mime_type, @size, @file_path, @created_at)`
@@ -401,15 +465,17 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
           file_path: filePath,
           created_at: Date.now()
         });
-        const filePayload = {
+        const filePayload: Record<string, unknown> = {
           type: 'file',
           id: fileId,
           name: fileName,
           mimeType,
           size,
-          url: `/api/conversations/${conversationId}/files/${fileId}`,
-          content: resolvedContent
+          url: `/api/conversations/${conversationId}/files/${fileId}`
         };
+        if (shouldPreviewMarkdown(fileName, mimeType)) {
+          filePayload.content = String(resolvedContent ?? '');
+        }
         assistantAttachments.push(filePayload);
         db.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(
           JSON.stringify(assistantAttachments),
