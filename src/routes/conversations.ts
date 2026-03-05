@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import { FastifyInstance } from 'fastify';
+import OpenAI from 'openai';
 import fs from 'fs';
 import { unlink, writeFile } from 'fs/promises';
 import path from 'path';
@@ -136,7 +137,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
         }
       : null;
     const fileInstruction = outputFileSpec
-      ? '\n\nJika perlu membuat file, gunakan format:\nRESPONSE:\n<tulisan jawaban singkat>\n\nFILE:\n<isi file lengkap>\n\nJangan menaruh isi file di bagian RESPONSE.\nJangan gunakan tool call apapun.'
+      ? '\n\nSaat diminta membuat file, panggil function tool `present_files` untuk mengirim hasil akhir. Isi argumen `response` dengan jawaban singkat dan `files` dengan daftar file berisi `name`, `content`, dan `mimeType` opsional.'
       : '';
     const systemPrompt = buildSystemPrompt(project, docs, userName) + fileInstruction;
 
@@ -185,35 +186,38 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
     const services: Array<'slack' | 'atlassian'> = [];
     if (slack?.enabled) services.push('slack');
     if (jira?.enabled || confluence?.enabled) services.push('atlassian');
-    const tools = outputFileSpec
-      ? undefined
-      : (services.length > 0 ? await mcpManager.getTools(services) : undefined);
-    const settings = project.settings ? JSON.parse(project.settings) : {};
-
-    let fullResponse = '';
-    try {
-      for await (const event of streamMessageWithTools({
-        systemPrompt,
-        messages: [...history, { role: 'user', content: body.content }],
-        tools,
-        model: settings.model,
-        toolExecutor: tools ? async (name, input) => mcpManager.executeTool(name, input) : undefined
-      })) {
-        if (event.type === 'text') {
-          fullResponse += event.text;
-          if (!outputFileSpec) {
-            reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: event.text })}\n\n`);
+    const mcpTools = services.length > 0 ? await mcpManager.getTools(services) : undefined;
+    const presentFilesTool: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined = outputFileSpec
+      ? [{
+          type: 'function',
+          function: {
+            name: 'present_files',
+            description: 'Mengirim file final dari AI ke platform.',
+            parameters: {
+              type: 'object',
+              properties: {
+                response: { type: 'string' },
+                files: {
+                  type: 'array',
+                  minItems: 1,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      content: { type: 'string' },
+                      mimeType: { type: 'string' }
+                    },
+                    required: ['name', 'content']
+                  }
+                }
+              },
+              required: ['files']
+            }
           }
-        } else if (event.type === 'tool_use') {
-          reply.raw.write(`data: ${JSON.stringify({ type: 'tool_use', name: event.name })}\n\n`);
-        }
-      }
-    } catch (error: any) {
-      reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: error?.message ?? 'stream error' })}\n\n`);
-      reply.raw.end();
-      return;
-    }
-
+        }]
+      : undefined;
+    const tools = outputFileSpec ? presentFilesTool : mcpTools;
+    const settings = project.settings ? JSON.parse(project.settings) : {};
     const extractFileSections = (text: string) => {
       const fileMarker = /(^|\n)FILE:\s*/i;
       const responseMarker = /(^|\n)RESPONSE:\s*/i;
@@ -230,10 +234,97 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       const fileContent = fenceMatch ? fenceMatch[1].trim() : filePart;
       return { responseText, fileContent, hasFile: true };
     };
+    const previewFileId = uuidv4();
+    let lastPreviewFileContent = '';
+    let presentedResponseText = '';
+    let presentedFiles: Array<{ name: string; content: string; mimeType?: string }> = [];
+
+    let fullResponse = '';
+    try {
+      for await (const event of streamMessageWithTools({
+        systemPrompt,
+        messages: [...history, { role: 'user', content: body.content }],
+        tools,
+        model: settings.model,
+        toolExecutor: tools
+          ? async (name, input) => {
+              if (outputFileSpec && name === 'present_files') {
+                const payload = (input && typeof input === 'object') ? (input as any) : {};
+                const response = typeof payload.response === 'string' ? payload.response.trim() : '';
+                if (response) {
+                  presentedResponseText = response;
+                }
+                const rawFiles = Array.isArray(payload.files) ? payload.files : [];
+                const nextFiles = rawFiles
+                  .filter((file: any) => file && typeof file === 'object')
+                  .map((file: any) => ({
+                    name: String(file.name ?? '').trim(),
+                    content: String(file.content ?? ''),
+                    mimeType: typeof file.mimeType === 'string' ? file.mimeType : undefined
+                  }))
+                  .filter((file: any) => file.name && file.content.length > 0);
+                if (nextFiles.length > 0) {
+                  presentedFiles = nextFiles;
+                  const latest = nextFiles[nextFiles.length - 1];
+                  if (latest.content !== lastPreviewFileContent) {
+                    lastPreviewFileContent = latest.content;
+                    reply.raw.write(
+                      `data: ${JSON.stringify({
+                        type: 'file_preview',
+                        file: {
+                          id: previewFileId,
+                          name: latest.name || outputFileSpec.name || `assistant-${previewFileId}.txt`,
+                          mimeType: latest.mimeType || outputFileSpec.mimeType || 'text/plain; charset=utf-8'
+                        },
+                        content: latest.content,
+                        done: false
+                      })}\n\n`
+                    );
+                  }
+                }
+                return { ok: true, files: nextFiles.length };
+              }
+              return mcpManager.executeTool(name, input);
+            }
+          : undefined
+      })) {
+        if (event.type === 'text') {
+          fullResponse += event.text;
+          if (!outputFileSpec) {
+            reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: event.text })}\n\n`);
+          } else {
+            const parsedSections = extractFileSections(fullResponse);
+            if (parsedSections.hasFile && parsedSections.fileContent !== lastPreviewFileContent) {
+              lastPreviewFileContent = parsedSections.fileContent;
+              reply.raw.write(
+                `data: ${JSON.stringify({
+                  type: 'file_preview',
+                  file: {
+                    id: previewFileId,
+                    name: outputFileSpec.name ?? `assistant-${previewFileId}.txt`,
+                    mimeType: outputFileSpec.mimeType ?? 'text/plain; charset=utf-8'
+                  },
+                  content: parsedSections.fileContent,
+                  done: false
+                })}\n\n`
+              );
+            }
+          }
+        } else if (event.type === 'tool_use') {
+          reply.raw.write(`data: ${JSON.stringify({ type: 'tool_use', name: event.name })}\n\n`);
+        }
+      }
+    } catch (error: any) {
+      reply.raw.write(`data: ${JSON.stringify({ type: 'error', message: error?.message ?? 'stream error' })}\n\n`);
+      reply.raw.end();
+      return;
+    }
 
     let responseText = fullResponse;
     let fileContent = '';
     try {
+      let resolvedName = outputFileSpec?.name ?? `assistant-${previewFileId}.txt`;
+      let resolvedMimeType = outputFileSpec?.mimeType ?? inferMimeType(resolvedName);
       const parsedSections = outputFileSpec
         ? extractFileSections(fullResponse)
         : { responseText: fullResponse, fileContent: '', hasFile: false };
@@ -243,6 +334,32 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       fileContent = outputFileSpec
         ? (parsedSections.hasFile ? parsedSections.fileContent : fullResponse)
         : parsedSections.fileContent;
+      if (outputFileSpec && presentedFiles.length > 0) {
+        const requestedName = (outputFileSpec.name ?? '').trim().toLowerCase();
+        const selectedFile =
+          presentedFiles.find((file) => file.name.trim().toLowerCase() === requestedName) ??
+          presentedFiles[presentedFiles.length - 1];
+        const requestedExtMatch = (outputFileSpec.name ?? '').toLowerCase().match(/(\.[a-z0-9]+)$/);
+        const requestedExt = requestedExtMatch?.[1] ?? '';
+        const selectedName = selectedFile.name.trim() || resolvedName;
+        if (requestedExt && !selectedName.toLowerCase().endsWith(requestedExt)) {
+          const selectedBase = selectedName.replace(/\.[a-z0-9]+$/i, '');
+          resolvedName = `${selectedBase}${requestedExt}`;
+        } else {
+          resolvedName = selectedName;
+        }
+        resolvedMimeType = selectedFile.mimeType ?? outputFileSpec.mimeType ?? inferMimeType(resolvedName);
+        fileContent = selectedFile.content;
+        responseText = presentedResponseText || responseText || `File ${resolvedName} berhasil dibuat.`;
+      } else if (outputFileSpec) {
+        const fallbackText = fullResponse.trim();
+        if (!fileContent.trim()) {
+          fileContent = fallbackText;
+        }
+        if (!responseText.trim()) {
+          responseText = `File ${resolvedName} berhasil dibuat.`;
+        }
+      }
       if (outputFileSpec && responseText) {
         reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: responseText })}\n\n`);
       }
@@ -265,10 +382,10 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       });
       if (outputFileSpec) {
         const fileId = uuidv4();
-        const fileName = outputFileSpec.name ?? `assistant-${fileId}.txt`;
+        const fileName = resolvedName;
         const filePath = path.join(uploadDir, fileId);
         const resolvedContent = outputFileSpec.content ?? fileContent ?? fullResponse;
-        const mimeType = outputFileSpec.mimeType ?? 'text/plain; charset=utf-8';
+        const mimeType = resolvedMimeType || 'text/plain; charset=utf-8';
         await writeFile(filePath, resolvedContent ?? '');
         const size = Buffer.byteLength(resolvedContent ?? '', 'utf-8');
         db.prepare(
@@ -290,7 +407,8 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
           name: fileName,
           mimeType,
           size,
-          url: `/api/conversations/${conversationId}/files/${fileId}`
+          url: `/api/conversations/${conversationId}/files/${fileId}`,
+          content: resolvedContent
         };
         assistantAttachments.push(filePayload);
         db.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(
