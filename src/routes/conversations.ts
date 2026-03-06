@@ -354,11 +354,15 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
                     }
                     presentedFilePayloads.push(payloadFile);
                   }
-                    db.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(
-                      JSON.stringify(presentedFilePayloads),
-                      assistantMessageId
-                    );
+                  db.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(
+                    JSON.stringify(presentedFilePayloads),
+                    assistantMessageId
+                  );
                   const latest = presentedFilePayloads[presentedFilePayloads.length - 1] as any;
+                  if (!presentedResponseText.trim()) {
+                    const fallbackName = latest?.name ? String(latest.name) : 'file';
+                    presentedResponseText = `File ${fallbackName} berhasil dibuat.`;
+                  }
                   if (latest?.content && latest.content !== lastPreviewFileContent) {
                     lastPreviewFileContent = String(latest.content);
                     reply.raw.write(
@@ -374,6 +378,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
                       })}\n\n`
                     );
                   }
+                }
+                if (!presentedResponseText.trim()) {
+                  presentedResponseText = 'File berhasil dibuat.';
                 }
                 return { response: presentedResponseText, files: presentedFilePayloads };
               }
