@@ -36,8 +36,9 @@ export function buildSystemPrompt(project: any, projectDocs: any[], userName?: s
   ].join('\n');
 
   const honestyInstruction = 'Jawablah dengan jujur. Jika tidak yakin atau tidak tahu, katakan saja.';
+  const languageInstruction = 'Gunakan bahasa Indonesia atau Inggris sesuai bahasa pada prompt pengguna. Jangan gunakan bahasa lain kecuali diminta secara eksplisit atau saat menampilkan kutipan/teks asli berbahasa lain.';
 
-  return `${basePrompt}\n\n${knowledge}\n\n${userContext}\n\n${platformInstruction}\n\n${honestyInstruction}\n\nHari ini: ${dateString}`.trim();
+  return `${basePrompt}\n\n${knowledge}\n\n${userContext}\n\n${platformInstruction}\n\n${honestyInstruction}\n\n${languageInstruction}\n\nHari ini: ${dateString}`.trim();
 }
 
 type StreamEvent =
