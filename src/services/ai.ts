@@ -53,6 +53,19 @@ export async function* streamMessageWithTools(params: {
   model?: string;
   toolExecutor?: (name: string, input: unknown) => Promise<unknown>;
 }): AsyncGenerator<StreamEvent> {
+  const normalizeToolArguments = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return '{}';
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return JSON.stringify(parsed);
+      }
+      return '{}';
+    } catch {
+      return '{}';
+    }
+  };
   // Convert messages to OpenAI format
   let currentMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: 'system', content: params.systemPrompt },
@@ -137,7 +150,9 @@ export async function* streamMessageWithTools(params: {
             // Note: OpenAI can stream multiple tool calls, but usually sequentially or with index
             const index = toolCall.index;
             if (toolCalls[index]) {
-                toolCalls[index].arguments += toolCall.function.arguments;
+              toolCalls[index].arguments += toolCall.function.arguments;
+            } else if (toolCalls.length > 0) {
+              toolCalls[toolCalls.length - 1].arguments += toolCall.function.arguments;
             }
           }
         }
@@ -149,6 +164,7 @@ export async function* streamMessageWithTools(params: {
 
     // Execute tools
     for (const toolCall of toolCalls) {
+      toolCall.arguments = normalizeToolArguments(toolCall.arguments);
       let input: unknown = {};
       try {
         input = JSON.parse(toolCall.arguments);
