@@ -95,6 +95,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       const match = content.match(/([a-zA-Z0-9._-]+\.(py|js|ts|md|txt|json|csv|html|css))/i);
       if (match?.[1]) return match[1];
       if (lowerContent.includes('.py') || lowerContent.includes('python')) return 'script.py';
+      if (lowerContent.includes('html') || lowerContent.includes('web page') || lowerContent.includes('halaman')) {
+        return 'index.html';
+      }
       if (lowerContent.includes('.js') || lowerContent.includes('javascript')) return 'script.js';
       if (lowerContent.includes('.ts') || lowerContent.includes('typescript')) return 'script.ts';
       if (lowerContent.includes('markdown') || lowerContent.includes('.md')) return 'document.md';
