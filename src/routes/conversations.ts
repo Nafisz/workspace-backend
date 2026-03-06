@@ -187,6 +187,7 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
 
     const now = Date.now();
     const userMessageId = uuidv4();
+    const assistantMessageId = uuidv4();
     const messageCategory = classifyMessage(body.content);
     db.prepare(
       `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, category, created_at)
@@ -200,6 +201,19 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
       metadata: JSON.stringify({}),
       category: messageCategory,
       created_at: now
+    });
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, category, created_at)
+       VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @category, @created_at)`
+    ).run({
+      id: assistantMessageId,
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: '',
+      attachments: JSON.stringify([]),
+      metadata: JSON.stringify({}),
+      category: 'normal',
+      created_at: Date.now()
     });
 
     db.prepare('UPDATE conversations SET updated_at = ?, last_activity_at = ? WHERE id = ?').run(Date.now(), now, conversationId);
@@ -327,6 +341,10 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
                     }
                     presentedFilePayloads.push(payloadFile);
                   }
+                    db.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(
+                      JSON.stringify(presentedFilePayloads),
+                      assistantMessageId
+                    );
                   const latest = presentedFilePayloads[presentedFilePayloads.length - 1] as any;
                   if (latest?.content && latest.content !== lastPreviewFileContent) {
                     lastPreviewFileContent = String(latest.content);
@@ -345,6 +363,9 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
                   }
                 }
                 return { response: presentedResponseText, files: presentedFilePayloads };
+              }
+              if (outputFileSpec) {
+                return { error: 'Tool not available' };
               }
               return mcpManager.executeTool(name, input);
             }
@@ -418,22 +439,16 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
         reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: responseText })}\n\n`);
       }
 
-      const assistantMessageId = uuidv4();
       const assistantAttachments: Array<Record<string, unknown>> = [];
       const assistantCategory = classifyMessage(responseText);
       db.prepare(
-        `INSERT INTO messages (id, conversation_id, role, content, attachments, metadata, category, created_at)
-         VALUES (@id, @conversation_id, @role, @content, @attachments, @metadata, @category, @created_at)`
-      ).run({
-        id: assistantMessageId,
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: responseText,
-        attachments: JSON.stringify([]),
-        metadata: JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
-        category: assistantCategory,
-        created_at: Date.now()
-      });
+        `UPDATE messages SET content = ?, metadata = ?, category = ? WHERE id = ?`
+      ).run(
+        responseText,
+        JSON.stringify({ model: settings.model ?? 'claude-sonnet-4-6' }),
+        assistantCategory,
+        assistantMessageId
+      );
       if (outputFileSpec && presentedFilePayloads.length > 0) {
         assistantAttachments.push(...presentedFilePayloads);
         db.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(
