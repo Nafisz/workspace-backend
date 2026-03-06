@@ -328,6 +328,19 @@ export default fp(async function conversationsRoutes(app: FastifyInstance) {
                     const size = Buffer.isBuffer(resolvedContent)
                       ? resolvedContent.length
                       : Buffer.byteLength(String(resolvedContent ?? ''), 'utf-8');
+                    db.prepare(
+                      `INSERT INTO chat_files (id, conversation_id, message_id, name, mime_type, size, file_path, created_at)
+                       VALUES (@id, @conversation_id, @message_id, @name, @mime_type, @size, @file_path, @created_at)`
+                    ).run({
+                      id: fileId,
+                      conversation_id: conversationId,
+                      message_id: assistantMessageId,
+                      name: normalizedName || `assistant-${fileId}.txt`,
+                      mime_type: resolvedMimeType || 'text/plain; charset=utf-8',
+                      size,
+                      file_path: filePath,
+                      created_at: Date.now()
+                    });
                     const payloadFile: Record<string, unknown> = {
                       type: 'file',
                       id: fileId,
